@@ -29,7 +29,7 @@ struct visit{
 	long int id;
 	unsigned int page;
 	int time;
-	int topic;
+	set<int> topic;
 };
 
 typedef vector<visit> trajectory;

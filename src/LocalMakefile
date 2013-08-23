@@ -1,0 +1,3 @@
+bin/topics$(EXEEXT): bin/topics.o
+	$(BUILDEXE)
+
