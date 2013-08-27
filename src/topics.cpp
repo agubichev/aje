@@ -15,7 +15,7 @@
 
 using namespace std;
 
-const char* FILE_NAME="/home/andrey/data/alj_logs/logs_topics_countries.txt";
+const char* FILE_NAME="/home/andrey/data/alj_logs/logs_topics_corr.txt";
 
 // 3 hours cut-off for the page-to-page transition
 const int TIME_LIMIT =  15*60 * 1000;
@@ -80,13 +80,18 @@ static void constructTrajectories(map<long int, trajectory >& time_visits, vecto
 	cerr<<"less than 100 ms: "<<lessthanone<<endl;
 }
 
-static int getNumberOfTopics(const trajectory& traj){
+static double getNumberOfTopics(const trajectory& traj){
 	set<unsigned> topics;
+	unsigned max_topics=0;
+	unsigned total_topics=0;
 	for (auto v: traj){
+		if (v.topics.size()>max_topics)
+			max_topics=v.topics.size();
+		total_topics+=v.topics.size();
 		for (auto t: v.topics)
 			topics.insert(t);
 	}
-	return topics.size();
+	return 1.*traj.size()*topics.size()/total_topics;
 }
 
 static double getAverageNumberOfTopics(const vector<trajectory>& sequences){
@@ -113,13 +118,6 @@ static void genRandomSequence(vector<trajectory>& baseline, vector<trajectory>& 
 		allVisits[i] = allVisits[j];
 		allVisits[j] = tmp;
 	}
-	for (int i=allVisits.size()-1; i > 0; i--){
-		unsigned j = rand() % (i+1);
-		visit tmp = allVisits[i];
-		allVisits[i] = allVisits[j];
-		allVisits[j] = tmp;
-	}
-
 
 	// create a random sequence of collected visits. We keep the sequence length the same
 	unsigned ind = 0;
