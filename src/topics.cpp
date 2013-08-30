@@ -18,7 +18,7 @@ using namespace std;
 const char* FILE_NAME="/home/andrey/data/alj_logs/logs_countries_corr.txt";
 
 // 3 hours cut-off for the page-to-page transition
-const int TIME_LIMIT =  30*60 * 1000;
+static int TIME_LIMIT;
 const int TIME_MIN =  1000;
 
 // min size of the user trajectory
@@ -30,7 +30,7 @@ const unsigned int MAX_TOPICS = 20;
 struct visit{
 	long int id;
 	unsigned int page;
-	int time;
+	long int time;
 	set<int> topics;
 };
 
@@ -236,28 +236,59 @@ static void getFollowingTopicDistribution(int topic, vector<trajectory>& sequenc
 }
 
 // compute the earth mover's distance between two distributions
-static double getEMD( map<unsigned, double>& distr1,  map<unsigned, double>& distr2){
+static double getEMD(map<unsigned, double>& distr1,  map<unsigned, double>& distr2){
 	double res = 0;
 	double prev = 0;
 
 	for (map<unsigned, double>::iterator it = distr1.begin(); it != distr1.end(); it++){
 		double emd = prev + distr1[it->first] - distr2[it->first];
 		res += fabs(emd);
+		//cerr<<"emd "<<emd<<", res "<<res<<endl;
 		prev = emd;
 	}
+	//cerr<<"res "<<res<<endl;
 	return res;
+}
+
+static void getTopicDistribution(vector<trajectory>& sequences, map<unsigned,double>& distr){
+	set<unsigned> allTopics;
+
+	for (auto t: sequences){
+		for (auto v: t){
+			for (auto topic: v.topics)
+				allTopics.insert(topic);
+		}
+	}
+
+	for (auto t: allTopics)
+		distr[t]=0;
+
+	unsigned count=0;
+	for (auto t:sequences){
+		for (auto v: t){
+			for (auto topic: v.topics)
+				distr[topic]++;
+			count += v.topics.size();
+		}
+	}
+
+	for (auto &t: distr)
+		t.second /= count;
+
 }
 
 
 int main(int argc, char** argv) {
 
-	if (argc < 2){
-		cerr <<"usage: "<<argv[0] <<" <trajectory file> "<<endl;
+	if (argc < 3){
+		cerr <<"usage: "<<argv[0] <<" <trajectory file> <minutes>"<<endl;
 		return 1;
 	}
 
 
 	ifstream  in(argv[1]);
+
+	TIME_LIMIT=atoi(argv[2])*60*1000;
 
 	map<long int, trajectory > time_visits;
 
@@ -305,7 +336,6 @@ int main(int argc, char** argv) {
 
 //	printSequences(sequences,0,20);
 	cout<<"number of topics: "<<allTopics.size()<<endl;
-	cout<<"max topic: "<<*allTopics.rbegin()<<endl;
 	map<unsigned, distribution> baseline_freq;
 	for (auto topic: allTopics){
 		distribution freq;
@@ -313,16 +343,19 @@ int main(int argc, char** argv) {
 		baseline_freq[topic]=freq;
 	}
 
+	// frequency of topics across all sequences
+	map<unsigned, double> topic_distr;
+	getTopicDistribution(sequences,topic_distr);
+
 	vector<trajectory> generated;
-//	printSequences(generated,0,20);
-
-
-
 	unsigned exper_count=2;
-	map<unsigned, double> EMD;
+	// EMD between observed and generated 'next-topic' frequences
+	map<unsigned, double> EMD_gen;
+	// EMD between observed 'next-topic' frequency and frequency of topics in all sequences
+	map<unsigned, double> EMD_baseline;
 	// init EMD vector
 	for (auto t: allTopics)
-		EMD[t]=0;
+		EMD_gen[t]=0;
 
 	for (unsigned i=0; i < exper_count; i++){
 		generated.clear();
@@ -334,13 +367,13 @@ int main(int argc, char** argv) {
 			distribution freq;
 			getFollowingTopicDistribution(topic, generated, freq, *allTopics.rbegin());
 			double curEMD=getEMD(baseline_freq[topic], freq);
-			cerr<<"topic, EMD: "<<topic<<" "<<curEMD<<endl;
-			EMD[topic]+=getEMD(baseline_freq[topic], freq)/exper_count;
+			//cerr<<"topic, topic_distr, EMD: "<<topic<<" "<<topic_distr[topic]<<" "<<curEMD<<endl;
+			EMD_gen[topic]+=curEMD/exper_count;
 		}
 	}
 
-	for (auto t: allTopics){
-		cerr<<t<<" "<<EMD[t]<<endl;
+	for (auto topic: allTopics){
+		cerr<<"topic, topic_distr, EMD: "<<topic<<" "<<topic_distr[topic]<<" "<<EMD_gen[topic]<<endl;
 	}
 
 	for (unsigned i=0; i < 2; i++){
