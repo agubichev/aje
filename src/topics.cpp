@@ -12,19 +12,20 @@
 #include <vector>
 #include <math.h>
 #include <stdlib.h>
-
+#include <algorithm>
 using namespace std;
 
-const char* FILE_NAME="/home/andrey/data/alj_logs/logs_topics_corr.txt";
+const char* FILE_NAME="/home/andrey/data/alj_logs/logs_countries_corr.txt";
 
 // 3 hours cut-off for the page-to-page transition
-const int TIME_LIMIT =  15*60 * 1000;
+const int TIME_LIMIT =  30*60 * 1000;
 const int TIME_MIN =  1000;
 
 // min size of the user trajectory
-const unsigned int MIN_PATH_SIZE = 2;
+const unsigned int MIN_PATH_SIZE = 4;
 
 const unsigned int MAX_TOPICS = 20;
+
 
 struct visit{
 	long int id;
@@ -36,6 +37,8 @@ struct visit{
 typedef vector<visit> trajectory;
 
 typedef pair<unsigned, unsigned> topic_pair;
+
+typedef map<unsigned,double> distribution;
 
 // construct sequences of visits from the visit data
 static void constructTrajectories(map<long int, trajectory >& time_visits, vector<trajectory>& sequences){
@@ -94,12 +97,69 @@ static double getNumberOfTopics(const trajectory& traj){
 	return 1.*traj.size()*topics.size()/total_topics;
 }
 
+
+// get average topic-to-topic transition number
+static float getAverageTransitionNumber(vector<trajectory>& sequence){
+	float avgTransit = 0;
+	for (unsigned i = 0; i < sequence.size(); i++){
+		vector<visit> &v = sequence[i];
+		for (unsigned j = 0; j < v.size() - 1; j++){
+			set<unsigned> intersection;
+			set_intersection(v[j].topics.begin(), v[j].topics.end(), 
+								  v[j+1].topics.begin(), v[j+1].topics.end(),  
+								  inserter(intersection, intersection.begin()));
+
+			if (intersection.size()==0)
+				avgTransit += 1;
+		}
+	}
+	return avgTransit/sequence.size();
+}
+
+static void genShuffledSequence(const vector<trajectory>& baseline, vector<trajectory>& shuffle){
+	shuffle = baseline;
+
+	for (unsigned i=0; i < shuffle.size(); i++){
+		trajectory &tr = shuffle[i];
+		for (int j = tr.size()-1; j > 0; j--){
+			unsigned k = rand()%(j+1);
+			visit tmp = tr[j];
+			tr[j] = tr[k];
+			tr[k] = tmp;
+		}
+	}
+}
+
+
+static double getJaccard(const set<int>& a, const set<int>& b){
+	set<unsigned> u, i;
+	set_union(a.begin(), a.end(), b.begin(), b.end(), inserter(u, u.begin()));
+	set_intersection(a.begin(), a.end(), b.begin(), b.end(),  inserter(i, i.begin()));
+	return 1.0*(i.size())/(u.size());
+}
+
+static double getJaccardMetric(const trajectory& traj){
+	double res=0;
+	for (unsigned i=0; i < traj.size()-1; i++){
+		res += getJaccard(traj[i].topics, traj[i+1].topics);
+	}
+
+	return res/(traj.size()-1);
+}
+
 static double getAverageNumberOfTopics(const vector<trajectory>& sequences){
 	double res=0;
 	for (auto t: sequences)
 		res+=getNumberOfTopics(t);
 	res/=sequences.size();
 	return res;
+}
+
+static double getAverageJaccard(const vector<trajectory>& sequences){
+	double res=0;
+	for (auto t:sequences)
+		res+=getJaccardMetric(t);
+	return res/sequences.size();
 }
 
 static void genRandomSequence(vector<trajectory>& baseline, vector<trajectory>& random){
@@ -111,7 +171,6 @@ static void genRandomSequence(vector<trajectory>& baseline, vector<trajectory>& 
 		}
 	}
 
-	cerr<<allVisits.size()<<endl;
 	for (int i=allVisits.size()-1; i > 0; i--){
 		unsigned j = rand() % (i+1);
 		visit tmp = allVisits[i];
@@ -134,8 +193,71 @@ static void genRandomSequence(vector<trajectory>& baseline, vector<trajectory>& 
 }
 
 
-int main() {
-	ifstream  in(FILE_NAME);
+void printSequences(const vector<trajectory>& sequences, unsigned offset, unsigned amount){
+	unsigned count=offset;
+	for (auto traj: sequences){
+		cout<<"["<<count<<"] ";
+		for (auto v: traj){
+			cout<<v.page<<" (";
+			for (auto topic: v.topics)
+				cout<<topic<<" ";
+			cout<<")";
+		}
+		cout<<" --- "<<getNumberOfTopics(traj)<<", "<<getJaccardMetric(traj);
+		cout<<endl;
+		if (++count > offset+amount)
+			break;
+	}
+}
+
+
+// compute the topic distribution of documents that _follow_ any document with the specified topic
+static void getFollowingTopicDistribution(int topic, vector<trajectory>& sequences, map<unsigned, double>& freq, unsigned max_topics){
+	for (unsigned i =0; i <= max_topics; i++){
+		freq[i] = 0;
+	}
+
+	unsigned total = 0;
+	for (unsigned i = 0; i < sequences.size(); i++){
+		trajectory& t = sequences[i];
+		for (unsigned k = 0; k < t.size()-1; k++){
+			if (t[k].topics.count(topic)){
+				total+=t[k+1].topics.size();
+				for (auto topic: t[k+1].topics)
+				freq[topic] += 1;
+			}
+		}
+	}
+
+	if (total)
+		for (map<unsigned, double>::iterator it = freq.begin(); it != freq.end(); it++){
+			freq[it->first] /= total;
+		}
+}
+
+// compute the earth mover's distance between two distributions
+static double getEMD( map<unsigned, double>& distr1,  map<unsigned, double>& distr2){
+	double res = 0;
+	double prev = 0;
+
+	for (map<unsigned, double>::iterator it = distr1.begin(); it != distr1.end(); it++){
+		double emd = prev + distr1[it->first] - distr2[it->first];
+		res += fabs(emd);
+		prev = emd;
+	}
+	return res;
+}
+
+
+int main(int argc, char** argv) {
+
+	if (argc < 2){
+		cerr <<"usage: "<<argv[0] <<" <trajectory file> "<<endl;
+		return 1;
+	}
+
+
+	ifstream  in(argv[1]);
 
 	map<long int, trajectory > time_visits;
 
@@ -165,50 +287,70 @@ int main() {
 
 	constructTrajectories(time_visits, sequences);
 
-//	map<unsigned, double> topic_distr;
+//	map<nusigned, double> topic_distr;
 //	getTopicDistribution(sequences, topic_distr);
 	cout<<"number of sequences: "<<sequences.size()<<endl;
+	cout<<"Baseline: avg number of topics: "<<getAverageNumberOfTopics(sequences)<<endl;
+	cout<<"Baseline: avg Jaccard coefficient: "<<getAverageJaccard(sequences)<<endl;
+	cout<<"Baseline: avg topic transition: "<<getAverageTransitionNumber(sequences)<<endl;
+	printSequences(sequences,0,20);
+	set<unsigned> allTopics;
 
-	unsigned i=0;
-	for (auto traj: sequences){
-		cout<<traj[0].id<<" ";
-		for (auto v: traj){
-			cout<<v.page<<" (";
+	for (auto t: sequences){
+		for (auto v: t){
 			for (auto topic: v.topics)
-				cout<<topic<<" ";
-			cout<<")";
+				allTopics.insert(topic);
 		}
-		cout<<getNumberOfTopics(traj);
-		cout<<endl;
-		if (i++ > 30)
-			break;
 	}
 
-	cout<<"avg number of topics: "<<getAverageNumberOfTopics(sequences)<<endl;
+//	printSequences(sequences,0,20);
+	cout<<"number of topics: "<<allTopics.size()<<endl;
+	cout<<"max topic: "<<*allTopics.rbegin()<<endl;
+	map<unsigned, distribution> baseline_freq;
+	for (auto topic: allTopics){
+		distribution freq;
+		getFollowingTopicDistribution(topic, sequences, freq, *allTopics.rbegin());
+		baseline_freq[topic]=freq;
+	}
 
 	vector<trajectory> generated;
-	genRandomSequence(sequences, generated);
-	cout<<"avg number of topics: "<<getAverageNumberOfTopics(generated)<<endl;
-	 i=0;
-	for (auto traj: generated){
-		cout<<traj[0].id<<" ";
-		for (auto v: traj){
-			cout<<v.page<<" (";
-			for (auto topic: v.topics)
-				cout<<topic<<" ";
-			cout<<")";
-		}
-		cout<<getNumberOfTopics(traj);
-		cout<<endl;
-		if (i++ > 30)
-			break;
-	}
-	for (unsigned i=0; i < 10; i++){
+//	printSequences(generated,0,20);
+
+
+
+	unsigned exper_count=2;
+	map<unsigned, double> EMD;
+	// init EMD vector
+	for (auto t: allTopics)
+		EMD[t]=0;
+
+	for (unsigned i=0; i < exper_count; i++){
 		generated.clear();
 		genRandomSequence(sequences, generated);
-		cout<<"avg number of topics: "<<getAverageNumberOfTopics(generated)<<endl;
+		cout<<"Random: avg number of topics: "<<getAverageNumberOfTopics(generated)<<endl;
+		cout<<"Random: avg Jaccard coefficient: "<<getAverageJaccard(generated)<<endl;
+		cout<<"Random: avg topic transition: "<<getAverageTransitionNumber(generated)<<endl;
+		for (auto topic: allTopics){
+			distribution freq;
+			getFollowingTopicDistribution(topic, generated, freq, *allTopics.rbegin());
+			double curEMD=getEMD(baseline_freq[topic], freq);
+			cerr<<"topic, EMD: "<<topic<<" "<<curEMD<<endl;
+			EMD[topic]+=getEMD(baseline_freq[topic], freq)/exper_count;
+		}
 	}
 
+	for (auto t: allTopics){
+		cerr<<t<<" "<<EMD[t]<<endl;
+	}
+
+	for (unsigned i=0; i < 2; i++){
+		generated.clear();
+		genShuffledSequence(sequences, generated);
+		cout<<"Shuffled: avg number of topics: "<<getAverageNumberOfTopics(generated)<<endl;
+		cout<<"Shuffled: avg Jaccard coefficient: "<<getAverageJaccard(generated)<<endl;
+		cout<<"Shuffled: avg topic transition: "<<getAverageTransitionNumber(generated)<<endl;
+		//printSequences(generated,0,20);
+	}
 
 	return 0;
 }
