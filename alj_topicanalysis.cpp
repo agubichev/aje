@@ -28,7 +28,7 @@ const unsigned int MAX_TOPICS = 17;
 struct visit{
 	long int id;
 	unsigned int page;
-	int time;
+	long int time;
 	set<int> topic;
 };
 

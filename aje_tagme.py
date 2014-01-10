@@ -1,5 +1,6 @@
 import requests
 import MySQLdb
+import random
 from sets import Set
 
 db = MySQLdb.connect(host="localhost",user="root",db="alj_tagme")
@@ -12,9 +13,13 @@ results = cur.fetchall()
 
 data_tagme={}
 
-for row in results:
+i = 0
+while i<100:
+	i += 1
+	row = results[random.randint(0,len(results)-1)]
 	data={"key":"andrey2014", "text":row[1]}
-	response = requests.get(url, params=data)
+	#print "LEN", len(row[1])
+	response = requests.post(url, params=data)
 	print row[1]
 	print len(row[1])
 	print response.text
